@@ -138,7 +138,7 @@ static ECHI_QH * qh_malloc(void)
         }
     }
     
-    return NULL;
+    return NULL; 
 }
 
 static void qh_free(ECHI_QH * qh)
