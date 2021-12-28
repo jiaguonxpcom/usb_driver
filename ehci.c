@@ -424,6 +424,7 @@ static void dump_periodic_queue(ehci_handle_t * handle)
 
 /*
     Period qh is for interrupt transaction.
+    tt
 */
 static ECHI_QH  * install_periodic_qh(ehci_handle_t * handle, 
                                       uint32_t addr, 
