@@ -12,12 +12,13 @@
 
 #define ECHI_BUF_ADDR_MASK (~0xfff)
 
-#define ECHI_QH_ADDR_MASK       (~0x1f)
-#define ECHI_QH_HLINK_TYPE_MASK (~0x6)
-#define ECHI_QH_HLINK_TYPE_ITD  (0<<1)
-#define ECHI_QH_HLINK_TYPE_QH   (1<<1)
-#define ECHI_QH_HLINK_TYPE_SITD (2<<1)
-#define ECHI_QH_HLINK_TYPE_FSTN (3<<1)
+#define ECHI_HLINK_ADDR_MASK (~0x1f)
+
+#define ECHI_HLINK_TYPE_MASK (~0x6)
+#define ECHI_HLINK_TYPE_ITD  (0<<1)
+#define ECHI_HLINK_TYPE_QH   (1<<1)
+#define ECHI_HLINK_TYPE_SITD (2<<1)
+#define ECHI_HLINK_TYPE_FSTN (3<<1)
 
 #define ECHI_QH_ECHAR_NAK_RL(n)      (n<<28)
 #define ECHI_QH_ECHAR_NAK_RL(n)      (n<<28)
@@ -58,6 +59,12 @@
 #define EHCI_QTD_TOKEN_GET_TOTAL_BYTES(n) (n>>16)&0xff
 
 
+
+#define EHCI_BOUNDARY_ALIGNMENT 32
+#define ALLOCATED   1
+#define UNALLOCATED 0
+
+
 #define LOG_ENABLE 1
 
 // qTD
@@ -67,185 +74,33 @@ typedef struct _ECHI_QTD
     uint32_t alt_qtd;    // 2
     uint32_t token;      // 3
     uint32_t buf[5];     // 4 to 8
-} ECHI_QTD;
+} ECHI_QTD_t;
 
 // qH
 typedef struct _ECHI_QH
 {
-    uint32_t hLink;   // 1 word
+    uint32_t hlink;   // 1 word
     uint32_t echar;   // 1 word
     uint32_t ecapa;   // 1 word
     uint32_t cur_qtd; // 1 word
-    ECHI_QTD qtd;     // 8 word
+    ECHI_QTD_t qtd;   // 8 word
 
     // non-ehci definition
     // this is a special design, place some information here, it can be used in ISR callback.
-    ECHI_QTD * first_qtd; // 1 word
-    uint8_t * buf_in;     // 1 word
-    uint32_t  len_in;     // 1 word
-    uint32_t  interval;   // 1 word, for int EP
+    ECHI_QTD_t * first_qtd;  // 1 word
+    uint8_t *    buf_in;     // 1 word
+    uint32_t     len_in;     // 1 word
+    uint32_t     interval;   // 1 word, for int EP
 
-    // 4 + 8 + 4
+    // 4 + 8 + 4 = 16 words
     // Total size should be 32 byte align = 8 words align
-} ECHI_QH;
+} ECHI_QH_t;
 
-typedef struct _ECHI_PFL
-{
-    void * frame[CONFIG_PFL_SIZE];
-} ECHI_PFL; //Period Frame List
 
-/*
-    --------------- QH, QTD malloc and free --------------
-*/
-#define EHCI_BOUNDARY_ALIGNMENT 32
-#define ALLOCATED   1
-#define UNALLOCATED 0
-typedef struct _MEM_Manage
-{
-    ECHI_QH  qh[CONFIG_QH_CNT];
-    ECHI_QTD qtd[CONFIG_QTD_CNT];
-    uint8_t  qh_allocated[CONFIG_QH_CNT];
-    uint8_t  qtd_allocated[CONFIG_QTD_CNT];
-    uint8_t  alignment[EHCI_BOUNDARY_ALIGNMENT];
-} MEM_Manage;
 
-static MEM_Manage mem_manage;
-static MEM_Manage * p_mem_manage;
 
-static void mem_manage_init(void)
-{
-    uint32_t addr;
-    int i;
-    memset(&mem_manage, 0, sizeof(MEM_Manage));
-    
-    addr  = (uint32_t)(&mem_manage);
-    addr += EHCI_BOUNDARY_ALIGNMENT;
-    addr &=  ~(EHCI_BOUNDARY_ALIGNMENT-1);
-    p_mem_manage = (MEM_Manage *)addr;
-}
-static ECHI_QH * qh_malloc(void)
-{
-    int i;
-    ECHI_QH * qh;
-    for(i=0; i<CONFIG_QH_CNT; i++)
-    {
-        if(p_mem_manage->qh_allocated[i] == UNALLOCATED)
-        {
-            p_mem_manage->qh_allocated[i] = ALLOCATED;
-            qh = &(p_mem_manage->qh[i]);
-            memset(qh, 0, sizeof(ECHI_QH));
-            return qh;
-        }
-    }
-    
-    return NULL; 
-}
 
-static void qh_free(ECHI_QH * qh)
-{
-    int i;
-    for(i=0; i<CONFIG_QH_CNT; i++)
-    {
-        if(qh == &(p_mem_manage->qh[i]))
-        {
-            usb_printf("qh_free ok. i = %d\r\n", i);
-            p_mem_manage->qh_allocated[i] = UNALLOCATED;
-            break;
-        }
-    }
-}
-static ECHI_QTD * qtd_malloc(void)
-{
-    int i;
-    ECHI_QTD * qtd;
-    for(i=0; i<CONFIG_QTD_CNT; i++)
-    {
-        if(p_mem_manage->qtd_allocated[i] == UNALLOCATED)
-        {
-            p_mem_manage->qtd_allocated[i] = ALLOCATED;
-            qtd = &(p_mem_manage->qtd[i]);
-            memset(qtd, 0, sizeof(ECHI_QTD));
-            return qtd;
-        }
-    }
-    
-    return NULL;
-}
 
-static void qtd_free(ECHI_QTD * qtd)
-{
-    int i;
-    for(i=0; i<CONFIG_QTD_CNT; i++)
-    {
-        if(qtd == &(p_mem_manage->qtd[i]))
-        {
-            usb_printf("qtd_free ok. i = %d \r\n", i);
-            p_mem_manage->qtd_allocated[i] = UNALLOCATED;
-            break;
-        }
-    }
-}
-
-/*
-    --------------- 4K buf  --------------
-*/
-static char buf_4k[4096 * CONFIG_4K_BUF_CNT + 4096];
-static char * p_buf_4k;
-static char buf_4k_busy[CONFIG_4K_BUF_CNT];
-
-static void buf_4k_init(void)
-{
-    uint32_t addr;
-    addr = (uint32_t)buf_4k;
-    addr += 4096;
-    addr &= ~0xFFF;
-    p_buf_4k = (char *)addr;
-    memset(buf_4k_busy, 0, sizeof(buf_4k_busy));
-}
-static void * buf_4k_malloc(void)
-{
-    uint32_t i;
-    void * r;
-    for(i=0; i<CONFIG_4K_BUF_CNT; i++)
-    {
-        if(buf_4k_busy[i] == 0)
-        {
-            buf_4k_busy[i] = 1;
-            r = p_buf_4k + i * 4096;
-            memset(r, 0, 4096);
-            return r;
-        }
-    }
-    return NULL;
-}
-static void buf_4k_free(void * p)
-{
-    uint32_t i;
-    
-    p = (void *)((uint32_t)p & 0xfffff000);
-    
-    if(p == NULL)
-        return;
-    
-    for(i=0; i<CONFIG_4K_BUF_CNT; i++)
-    {
-        if((p_buf_4k + i*4096) == p)
-        {
-            usb_printf("buf_4k_free ok, i = %d\r\n", i);
-            buf_4k_busy[i] = 0;
-            return;
-        }
-    }
-}
-static ECHI_PFL * pfl_malloc(void)
-{
-    return buf_4k_malloc();
-}
-
-static void pfl_free(ECHI_PFL * pfl)
-{
-    buf_4k_free(pfl);
-}
 /*
     --------------- Cache maintenance --------------
 */
@@ -282,316 +137,31 @@ static bool qh_qtd_last(uint32_t qh_qtd)
 static uint32_t make_hlink(void * addr, uint32_t type)
 {
     uint32_t r;
-    r = (uint32_t)addr & ECHI_QH_ADDR_MASK;
+    r = (uint32_t)addr & ECHI_HLINK_ADDR_MASK;
     r |= type;
     return r;
 }
 /*
-    This funciton use new_addr to update the address in hLink
+    hlink point to new_addr
 */
-static uint32_t update_hlink_address(uint32_t hlink, void * new_addr)
+static uint32_t update_hlink_address(uint32_t * hlink, uint32_t new_addr)
 {
-    uint32_t r;
-    r = (uint32_t)new_addr & ECHI_QH_ADDR_MASK;
-    r |= hlink & (~ECHI_QH_ADDR_MASK);
-    return r;
-}
-static void echi_async_enable(USB_Type * usb)
-{
-    usb->USBCMD |= USB_USBCMD_ASE_MASK;
-}
-static void echi_async_disable(USB_Type * usb)
-{
-    usb->USBCMD &= ~USB_USBCMD_ASE_MASK;
+    new_addr &= ECHI_HLINK_ADDR_MASK;
+    *hlink   &= (~ECHI_HLINK_ADDR_MASK);
+    *hlink   &=  ~ECHI_T;
+    *hlink   |= new_addr;
 }
 
 
-typedef enum _EP_TYPE
-{
-    control_ep,
-    bulk_ep,
-    int_ep,
-    iso_ep
-} EP_TYPE;
-
-static ECHI_QH  * install_async_qh(ehci_handle_t * handle, 
-                                   uint32_t addr, 
-                                   uint32_t ep, 
-                                   uint32_t speed,
-                                   EP_TYPE  ep_type)
-{
-    ECHI_QH  * qh;
-    ECHI_QH  * qh_loop;
-    uint32_t package_len_max = 0;
-
-    qh = qh_malloc();    
-    if(qh == NULL)
-    {
-        usb_printf("***install_async_qh fail. \r\n");
-        return NULL;
-    }
-    
-    if(ep_type == control_ep)
-    {
-        package_len_max = 64;
-    }
-    
-    qh->echar  = ECHI_QH_ECHAR_NAK_RL(15)                   |
-                 ECHI_QH_ECHAR_MAX_PACKAGE(package_len_max) |
-                 ECHI_QH_ECHAR_TOGGLE_BY_QTD                |
-                 ECHI_QH_ECHAR_SPEED(speed)                 |
-                 ECHI_QH_ECHAR_EP(ep)                       |
-                 ECHI_QH_ECHAR_ADDR(addr);
-
-    /*
-    Control Endpoint Flag (C). 
-    If the QH.EPS field indicates the endpoint is not a high-speed device, 
-    and the endpoint is a control endpoint, then software must set this bit to a one. 
-    Otherwise, it should always set this bit to zero.
-    */
-    if( (ep_type == control_ep) && ((speed == EHCI_SPEED_FULL) || 
-                                    (speed == EHCI_SPEED_LOW)  ) )
-    {
-        qh->echar |= ECHI_QH_ECHAR_C;
-    }
-    qh->ecapa = ECHI_QH_ECAPA_MULTI(3);
-    qh->qtd.next_qtd = ECHI_T;
 
 
-    if(handle->usb->ASYNCLISTADDR == 0)
-    {
-        // 1st qh, qh_hs(0, 0)
-        qh->echar |= ECHI_QH_ECHAR_HEAD;
-        qh->hLink  = (uint32_t)qh | ECHI_QH_HLINK_TYPE_QH;
-        handle->usb->ASYNCLISTADDR = (uint32_t)qh;
-        handle->qh_hs00 = qh;
-        usb_printf("qh header added. \r\n");
-    }
-    else
-    {
-        // add to the last of the queue
-        qh->hLink = (uint32_t)handle->qh_hs00 | ECHI_QH_HLINK_TYPE_QH;
 
-        // go to last qh
-        qh_loop = handle->qh_hs00;
-        while((qh_loop->hLink & ECHI_QH_ADDR_MASK) != (uint32_t)(handle->qh_hs00) )
-        {
-            qh_loop = (ECHI_QH  *)(qh_loop->hLink & ECHI_QH_ADDR_MASK);
-        }
-        qh_loop->hLink = (uint32_t)qh | ECHI_QH_HLINK_TYPE_QH;
-        
-        if(handle->usb->USBCMD & USB_USBCMD_ASE_MASK)
-        {
-            // wait until current qh is accessed by USB controller.
-            while( (uint32_t)(handle->usb->ASYNCLISTADDR & ECHI_QH_ADDR_MASK) != ((uint32_t)handle->qh_hs00 & 0xFFFFFFE0) )
-                ;
-            
-            usb_printf("new qh added dynamically\r\n");            
-        }
-        else
-        {
-            usb_printf("new qh added statically\r\n");    
-        }
-    }
-
-    usb_printf("\r\n\r\n\r\n\r\n");
-    return qh;
-}
-static void uninstall_async_qh(ehci_handle_t * handle, uint32_t addr, uint32_t ep)
-{
-    
-}
-#define ADDR0 0
-#define EP0   0
-static void init_async_schecule(ehci_handle_t * handle)
-{
-    install_async_qh(handle, ADDR0, EP0, EHCI_SPEED_HIGH, control_ep);
-    install_async_qh(handle, ADDR0, EP0, EHCI_SPEED_FULL, control_ep);
-    echi_async_enable(handle->usb);
-}
-static void echi_periodic_enable(USB_Type * usb)
-{
-    usb->USBCMD |= USB_USBCMD_PSE_MASK;
-}
-static void echi_periodic_disable(USB_Type * usb)
-{
-    usb->USBCMD &= ~USB_USBCMD_PSE_MASK;
-}
-static void dump_periodic_queue(ehci_handle_t * handle)
-{
-
-}
-
-/*
-    Period qh is for interrupt transaction.
-*/
-static ECHI_QH  * install_periodic_qh(ehci_handle_t * handle, 
-                                      uint32_t addr, 
-                                      uint32_t ep,
-                                      uint32_t speed,
-                                      uint32_t interval)
-{
-    ECHI_QH  * qh;
-    ECHI_QH  * qh_cur;
-    ECHI_QH  * qh_prev;
-    uint32_t package_len_max = 0;
-
-    qh = qh_malloc();    
-    if(qh == NULL)
-    {
-        usb_printf("***install_periodic_qh fail. \r\n");
-        return NULL;
-    }
-    
-    if(speed == EHCI_SPEED_HIGH)
-    {
-        package_len_max = 1024;
-    }
-    else
-    {
-        package_len_max = 64; // interrupt transaction
-    }
-    
-    qh->echar  = ECHI_QH_ECHAR_NAK_RL(15)                   |
-                 ECHI_QH_ECHAR_MAX_PACKAGE(package_len_max) |
-                 ECHI_QH_ECHAR_TOGGLE_BY_QTD                |
-                 ECHI_QH_ECHAR_SPEED(speed)                 |
-                 ECHI_QH_ECHAR_EP(ep)                       |
-                 ECHI_QH_ECHAR_ADDR(addr);
-
-    qh->ecapa = ECHI_QH_ECAPA_MULTI(3);
-    qh->qtd.next_qtd = ECHI_T;
-    
-    qh->interval = interval;
-
-    // Now add this qh periodic qh queue
-    if( (uint32_t)(handle->pfl_head) == ECHI_T)
-    {
-        // 0 element in queue, add to pfl_head.
-        handle->pfl_head = qh;
-    }
-    else
-    {
-        qh_prev = NULL;
-        qh_cur  = handle->pfl_head;
-
-        while(1)
-        {
-            if(qh->interval >= qh_cur->interval)
-            {
-                // add to right of qh_cur
-                // 1.qh point to qh_cur.
-                qh->hLink = make_hlink(qh_cur, ECHI_QH_HLINK_TYPE_QH);
-
-                // 2.qh_prev point to qh
-                if(qh_prev == NULL)
-                {
-                    handle->pfl_head = qh;
-                }
-                else
-                {
-                    qh_prev->hLink = update_hlink_address(qh_prev->hLink, qh);
-                }
-
-                usb_printf("period element added at left. \r\n");
-                break;
-            }
-            else
-            {
-                if(hlink_last(qh_cur->hLink))
-                {
-                    // current qh is minimum interval and should be placed at the end
-                    // qh_cur point qh
-                    qh_cur->hLink = update_hlink_address(qh_cur->hLink, qh);
-                    usb_printf("period element added at right. \r\n");
-                    break;
-                }
-            }
-
-            // move to next qh
-            qh_prev = qh_cur;
-            qh_cur  = (ECHI_QH  *)(qh_cur->hLink & ECHI_QH_ADDR_MASK);
-        }
-    }
-
-    // update PFL
-
-    usb_printf("\r\n\r\n\r\n\r\n");
-    return qh;
-}
-
-static void uninstall_periodic_qh(ehci_handle_t * handle, uint32_t addr, uint32_t ep)
-{
-    
-}
-
-static ECHI_QH  * install_periodic_itd(ehci_handle_t * handle,
-                                       uint32_t addr,
-                                       uint32_t ep, 
-                                       uint32_t speed,
-                                       uint32_t ep_type)
-{
-   
-    return NULL;
-}
-static void uninstall_periodic_itd(ehci_handle_t * handle, uint32_t addr, uint32_t ep)
-{
-    
-}
-
-static ECHI_QH  * install_periodic_sitd(ehci_handle_t * handle,
-                                       uint32_t addr,
-                                       uint32_t ep, 
-                                       uint32_t speed,
-                                       uint32_t ep_type)
-{
-    
-    return NULL;
-}
-static void uninstall_periodic_sitd(ehci_handle_t * handle, uint32_t addr, uint32_t ep)
-{
-    
-}
-static void init_periodic_schecule(ehci_handle_t * handle)
-{
-    ECHI_PFL * pfl;
-    int i;
-    
-    pfl = pfl_malloc();
-    if(pfl == NULL)
-    {
-        usb_printf("pfl_malloc fail. \r\n");
-        return;
-    }
-    handle->pfl_table = pfl;
-    handle->pfl_head = (void *)ECHI_T;
-
-    for(i=0; i<CONFIG_PFL_SIZE; i++)
-    {
-        pfl->frame[i] = (void *)ECHI_T;
-    }
-    
-    d_cache_flush(&pfl->frame[0], sizeof(ECHI_PFL));
-
-    handle->usb->PERIODICLISTBASE = (uint32_t)(handle->pfl_table);
-    usb_printf("PERIODICLISTBASE = %x. \r\n", handle->usb->PERIODICLISTBASE);
-    
-    handle->usb->USBCMD &= ~0x800C;
-
-    switch(CONFIG_PFL_SIZE)
-    {
-        case 8:    handle->usb->USBCMD |= (1<<15) | (3<<2);  break;
-        case 16:   handle->usb->USBCMD |= (1<<15) | (2<<2);  break;
-        case 32:   handle->usb->USBCMD |= (1<<15) | (1<<2);  break;
-        case 64:   handle->usb->USBCMD |= (1<<15) | (0<<2);  break;
-        case 128:  handle->usb->USBCMD |= (0<<15) | (3<<2);  break;
-        case 256:  handle->usb->USBCMD |= (0<<15) | (2<<2);  break;
-        case 512:  handle->usb->USBCMD |= (0<<15) | (1<<2);  break;
-        case 1024: handle->usb->USBCMD |= (0<<15) | (0<<2);  break;
-    }
-    
-    echi_periodic_enable(handle->usb);
-}
+#include "ehci_config.h"
+#include "ehci_memory.h"
+#include "ehci_async.cxx"
+#include "ehci_period.cxx"
+#include "ehci_memory.cxx"
+#include "ehci_api.cxx"
 
 /*
     --------------- External API --------------
@@ -624,7 +194,7 @@ void ehci_init(ehci_handle_t * handle, uint32_t mode)
 
 void ehci_reset(ehci_handle_t * handle)
 {
-    uint32_t speed;
+    ehci_speed_t speed;
     usb_printf("--->ehci_reset.\n");
     
     handle->usb->PORTSC1 |= USB_PORTSC1_PR_MASK;
@@ -633,7 +203,7 @@ void ehci_reset(ehci_handle_t * handle)
         ;
     
     speed = ehci_get_speed(handle);
-    if(speed == EHCI_SPEED_HIGH)
+    if(speed == ehci_speed_high)
     {
         handle->phy->CTRL |= USBPHY_CTRL_ENHOSTDISCONDETECT_MASK;
     }
@@ -641,18 +211,18 @@ void ehci_reset(ehci_handle_t * handle)
 
 uint32_t ehci_get_speed(ehci_handle_t * handle)
 {
-	uint32_t speed;
+	ehci_speed_t speed;
 	speed = (handle->usb->PORTSC1 >> 26) & 3;
 
-    if(speed == EHCI_SPEED_HIGH)
+    if(speed == ehci_speed_high)
     {
         usb_printf("high speed \r\n");
     }
-    else if(speed == EHCI_SPEED_FULL)
+    else if(speed == ehci_speed_full)
     {
         usb_printf("full speed \r\n");
     }
-    else if(speed == EHCI_SPEED_LOW)
+    else if(speed == ehci_speed_low)
     {
         usb_printf("low speed \r\n");
     }
@@ -664,8 +234,8 @@ uint32_t ehci_get_speed(ehci_handle_t * handle)
 */
 int ehci_control_in(ehci_handle_t * handle, ehci_control_transfer_t * transfer)
 {
-    ECHI_QH  * qh;
-    ECHI_QTD * qtd[3];
+    ECHI_QH_t  * qh;
+    ECHI_QTD_t * qtd[3];
     char     * buf_4k[2];
     uint32_t package_len_max = 0;
 
@@ -730,14 +300,14 @@ int ehci_control_in(ehci_handle_t * handle, ehci_control_transfer_t * transfer)
     qtd[2]->buf[0] = 0;
     
 
-    if(transfer->speed == EHCI_SPEED_HIGH) 
+    if(transfer->speed == ehci_speed_high) 
     {
         qh = handle->qh_hs00;
     }
     else
     {
         // fs ls 00
-        qh = (ECHI_QH  *)(((ECHI_QH  *)(handle->qh_hs00))->hLink & ECHI_QH_ADDR_MASK);
+        qh = (ECHI_QH_t  *)(((ECHI_QH_t  *)(handle->qh_hs00))->hlink & ECHI_HLINK_ADDR_MASK);
     }
     usb_printf("qh = %x\r\n", qh);
 
@@ -747,10 +317,10 @@ int ehci_control_in(ehci_handle_t * handle, ehci_control_transfer_t * transfer)
     qh->first_qtd    = qtd[0];
     
     // Flush
-    d_cache_flush(qh,     sizeof(ECHI_QH));
-    d_cache_flush(qtd[0], sizeof(ECHI_QTD));
-    d_cache_flush(qtd[1], sizeof(ECHI_QTD));
-    d_cache_flush(qtd[2], sizeof(ECHI_QTD));
+    d_cache_flush(qh,     sizeof(ECHI_QH_t));
+    d_cache_flush(qtd[0], sizeof(ECHI_QTD_t));
+    d_cache_flush(qtd[1], sizeof(ECHI_QTD_t));
+    d_cache_flush(qtd[2], sizeof(ECHI_QTD_t));
     d_cache_flush(buf_4k[0], transfer->len_setup);
     
     // Attach qh and enable async schedule
@@ -785,16 +355,16 @@ int ehci_iso_out(ehci_control_transfer_t * transfer)
     
 }
 
-static void free_qtd_in_qh(ECHI_QH  * qh)
+static void free_qtd_in_qh(ECHI_QH_t  * qh)
 {
-    ECHI_QTD * qtd;
-    ECHI_QTD * qtd_next;
+    ECHI_QTD_t * qtd;
+    ECHI_QTD_t * qtd_next;
 
-    qtd = (ECHI_QTD *)(qh->first_qtd);
+    qtd = (ECHI_QTD_t *)(qh->first_qtd);
     while(qtd != NULL)
     {
         buf_4k_free((void *)(qtd->buf[0]));
-        qtd_next = (ECHI_QTD *)(qtd->next_qtd);
+        qtd_next = (ECHI_QTD_t *)(qtd->next_qtd);
         qtd_free(qtd);
 
         if(qh_qtd_last((uint32_t)qtd_next))
@@ -814,9 +384,9 @@ static void free_qtd_in_qh(ECHI_QH  * qh)
 void mem_dump_8(void * addr, uint32_t len);
 static void isr_ioc(ehci_handle_t * handle, usb_callback_t callback)
 {
-    ECHI_QH  * qh;
-    ECHI_QH  * qh_prev;
-    ECHI_QTD * qtd;
+    ECHI_QH_t  * qh;
+    ECHI_QH_t  * qh_prev;
+    ECHI_QTD_t * qtd;
     uint32_t   pid[MAX_QTD_CNT_FROM_ONE_QH]       = {0};
     uint32_t   status[MAX_QTD_CNT_FROM_ONE_QH]    = {0};
     uint32_t   total_len[MAX_QTD_CNT_FROM_ONE_QH] = {0};
@@ -832,10 +402,10 @@ static void isr_ioc(ehci_handle_t * handle, usb_callback_t callback)
     qh = handle->qh_hs00;
     do
     {
-    	d_cache_invalidate(qh, sizeof(ECHI_QH));
+    	d_cache_invalidate(qh, sizeof(ECHI_QH_t));
 
     	// Go through each qTD
-        qtd = (ECHI_QTD *)(qh->first_qtd);
+        qtd = (ECHI_QTD_t *)(qh->first_qtd);
         
         if(qtd != NULL)
         {
@@ -844,7 +414,7 @@ static void isr_ioc(ehci_handle_t * handle, usb_callback_t callback)
             {
                 usb_printf("qtd->token = %x\r\n", qtd->token);
                 
-                d_cache_invalidate(qtd, sizeof(ECHI_QTD));
+                d_cache_invalidate(qtd, sizeof(ECHI_QTD_t));
                 pid[index]       = EHCI_QTD_TOKEN_GET_PID(qtd->token);
                 status[index]    = EHCI_QTD_TOKEN_GET_STATUS(qtd->token);
                 total_len[index] = EHCI_QTD_TOKEN_GET_TOTAL_BYTES(qtd->token);
@@ -876,7 +446,7 @@ static void isr_ioc(ehci_handle_t * handle, usb_callback_t callback)
                     }
                     else
                     {
-                        qtd = (ECHI_QTD *)(qtd->next_qtd);
+                        qtd = (ECHI_QTD_t *)(qtd->next_qtd);
                     }                    
                 }
             } // while(qtd != NULL)
@@ -918,7 +488,7 @@ static void isr_ioc(ehci_handle_t * handle, usb_callback_t callback)
         } // if(qtd != NULL)
 
         // process next qh
-        qh = (ECHI_QH  *)(qh->hLink & ECHI_QH_ADDR_MASK);
+        qh = (ECHI_QH_t  *)(qh->hlink & ECHI_HLINK_ADDR_MASK);
     } while(qh != handle->qh_hs00);
 }
 
@@ -961,7 +531,7 @@ void ehci_isr(ehci_handle_t * handle, usb_callback_t callback)
             callback(event_port_detach);
             handle->phy->CTRL &= ~USBPHY_CTRL_ENHOSTDISCONDETECT_MASK;
         }
-    }    
+    }
     if(status & USB_USBSTS_UI_MASK)
     {
         usb_printf("IOC \r\n");

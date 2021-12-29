@@ -383,6 +383,11 @@ static void usb1_event_handler_transfer_done(void)
             enumerate();
             state_usb1 = s_begin_enumeration1;
             break;
+        case s_begin_enumeration1:
+            usb_printf(" s_begin_enumeration1 \r\n");
+
+            // now try to setup iso schedule.
+            break;            
     }
 }
 
@@ -415,7 +420,7 @@ void low_level_tt(void)
     usb1_handle.usb = USB_OTG1;
     usb1_handle.phy = USBPHY1;
     
-    usb_printf("low_level_tt --------------------------\n");
+    usb_printf("low_level_tt %s, %s --------------------------\n", __DATE__, __TIME__);
     usb_soc_init();
 
     ehci_init(&usb1_handle, ECHI_MODE_HOST);

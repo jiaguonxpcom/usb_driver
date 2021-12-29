@@ -7,16 +7,30 @@
 #define ECHI_MODE_HOST   3
 #define ECHI_MODE_DEVICE 2
 
-#define EHCI_SPEED_FULL 0
-#define EHCI_SPEED_LOW  1
-#define EHCI_SPEED_HIGH 2
+typedef enum _ehci_speed
+{
+    ehci_speed_full = 0,
+    ehci_speed_low  = 1,
+    ehci_speed_high = 2
+}ehci_speed_t;
 
-typedef struct
+typedef enum _ep_type
+{
+    control,
+    bulk_out,
+    bulk_in,
+    int_out,
+    int_in,
+    iso_out,
+    iso_in    
+} ep_type_t;
+
+typedef struct _ehci_control_transfer
 {
     USB_Type * usb;
     uint32_t   addr;
     uint32_t   ep;
-    uint32_t   speed;
+    ehci_speed_t speed;
 
     uint8_t  * buf_setup;
     uint32_t   len_setup;
@@ -28,13 +42,13 @@ typedef struct
     uint32_t   len_out;
 } ehci_control_transfer_t;
 
-typedef struct
+typedef struct _ehci_handle
 {
     // app
     USB_Type    * usb;
     USBPHY_Type * phy;
     
-    // internal
+    // data below is a not care for app, it is used by driver itself only
     void * qh_hs00;
     
     void * pfl_table;
@@ -45,11 +59,6 @@ typedef struct
     Configuration
 */
 #define usb_printf PRINTF
-
-#define CONFIG_QH_CNT     3
-#define CONFIG_QTD_CNT    3
-#define CONFIG_4K_BUF_CNT 4
-#define CONFIG_PFL_SIZE   32 // Element size, it decide the maximum periodic interval
 
 
 
@@ -71,7 +80,7 @@ typedef void (*usb_callback_t)(ehci_callback_event_t event);
     API
 */
 void ehci_init(ehci_handle_t * handle, uint32_t mode);
-void ehci_reset(ehci_handle_t * handle); 
+void ehci_reset(ehci_handle_t * handle);
 uint32_t ehci_get_speed(ehci_handle_t * handle);
 int ehci_control_in(ehci_handle_t * handle, ehci_control_transfer_t * transfer);
 void ehci_isr(ehci_handle_t * handle, usb_callback_t callback);

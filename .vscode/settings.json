@@ -1,0 +1,6 @@
+{
+    "files.associations": {
+        "ehci_period.cxx": "c",
+        "ehci_memory.h": "c"
+    }
+}
