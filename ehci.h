@@ -7,6 +7,8 @@
 #define ECHI_MODE_HOST   3
 #define ECHI_MODE_DEVICE 2
 
+typedef void (*usb_callback)(uint32_t );
+
 typedef enum _ehci_speed
 {
     ehci_speed_full = 0,
@@ -55,6 +57,8 @@ typedef struct _ehci_handle
     void * pfl_head;
 } ehci_handle_t;
 
+typedef void * handle_t;
+
 /*
     Configuration
 */
@@ -84,7 +88,16 @@ void ehci_reset(ehci_handle_t * handle);
 uint32_t ehci_get_speed(ehci_handle_t * handle);
 int ehci_control_in(ehci_handle_t * handle, ehci_control_transfer_t * transfer);
 void ehci_isr(ehci_handle_t * handle, usb_callback_t callback);
-
+handle_t echi_create_iso_ep(
+    ehci_handle_t * handle,
+    uint32_t     addr, 
+    uint32_t     ep, 
+    ep_type_t    ep_type,
+    ehci_speed_t speed,
+    uint32_t     max_pack_size,
+    uint32_t     multi,
+    uint32_t     buf_4k_num);
+uint32_t ehci_write_ep(void * handle, void * buf, uint32_t len, usb_callback call_back);
 
 
 

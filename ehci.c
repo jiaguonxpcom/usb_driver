@@ -13,8 +13,7 @@
 #define ECHI_BUF_ADDR_MASK (~0xfff)
 
 #define ECHI_HLINK_ADDR_MASK (~0x1f)
-
-#define ECHI_HLINK_TYPE_MASK (~0x6)
+#define ECHI_HLINK_TYPE_MASK (0x6)
 #define ECHI_HLINK_TYPE_ITD  (0<<1)
 #define ECHI_HLINK_TYPE_QH   (1<<1)
 #define ECHI_HLINK_TYPE_SITD (2<<1)
@@ -66,6 +65,8 @@
 
 
 #define LOG_ENABLE 1
+
+
 
 // qTD
 typedef struct _ECHI_QTD
@@ -122,6 +123,10 @@ static bool hlink_last(uint32_t hlink)
     {
         return false;
     }
+}
+static uint32_t * hlink_next(uint32_t * hlink)
+{
+    return (uint32_t *)(*hlink & ECHI_HLINK_ADDR_MASK);
 }
 static bool qh_qtd_last(uint32_t qh_qtd)
 {

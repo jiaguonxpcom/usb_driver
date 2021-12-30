@@ -143,6 +143,7 @@ static void buf_4k_free(void * p)
 
 static void * pfl_malloc(void)
 {
+    // pfl should be 4K aligned.
     return buf_4k_malloc();
 }
 

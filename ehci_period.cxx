@@ -1,12 +1,21 @@
 
 
-#define ECHI_ITD_ADDR_MASK        (~0x1f)
-#define ECHI_ITD_BP0_EP(n)        (n<<9)
-#define ECHI_ITD_BP0_ADDR(n)      (addr<<0)
-#define ECHI_ITD_BP1_IO(n)        (n<<11)
-#define ECHI_ITD_BP1_MAX_PACK(n)  (n<<0)
-#define ECHI_ITD_BP2_MULTI(n)     (n<<0)
+#define ITD_ADDR_MASK        (~0x1f)
+#define ITD_BP0_EP(n)        (n<<9)
+#define ITD_BP0_ADDR(n)      (addr<<0)
+#define ITD_BP1_IO(n)        (n<<11)
+#define ITD_BP1_MAX_PACK(n)  (n<<0)
+#define ITD_BP2_MULTI(n)     (n<<0)
 
+#define ITD_SLOT_BYTES_MAX (1024 * 3)
+#define ITD_SLOT_CNT 8
+#define ITD_SLOT_PG_BYTES_MAX (1024 * 4)
+
+#define ITD_TSC_STATUS_ACTIVE (1<<31)
+#define ITD_TSC_TRANS_LEN(n)  (n<<16)
+#define ITD_TSC_IOC           (1<<15)
+#define ITD_TSC_PAGE(n)       (n<<12)
+#define ITD_TSC_OFFSET(n)     (n<<0)
 
 
 // ITD
@@ -21,7 +30,9 @@ typedef struct _ECHI_ITD
     uint8_t * buf_in;        // 1 word
     uint32_t  len_in;        // 1 word
     uint32_t  interval;      // 1 word
-    uint32_t  revserved[5];  // 5 word
+    usb_callback callback;
+    uint32_t  callback_para;
+    uint32_t  revserved[3];  // 5 word
 
     // 16 + 8 = 24 words
     // Total size should be 32 byte align = 8 words align
@@ -40,10 +51,6 @@ static void echi_periodic_disable(USB_Type * usb)
 {
     usb->USBCMD &= ~USB_USBCMD_PSE_MASK;
 }
-static void dump_periodic_queue(ehci_handle_t * handle)
-{
-
-}
 static uint32_t period_get_interval(void * element)
 {
     uint32_t * hlink;
@@ -60,6 +67,63 @@ static uint32_t period_get_interval(void * element)
             break;
     }
 }
+static void update_pfl_table(ehci_handle_t * handle)
+{
+    ECHI_PFL_t * pfl_table;
+    uint32_t   * hlink;
+
+    pfl_table = handle->pfl_table;
+    hlink     = handle->pfl_head;
+
+    if(hlink == NULL)
+    {
+        return;
+    }
+    
+    pfl_table->frame[0] = hlink;
+}
+static void dump_pfl_queue(ehci_handle_t * handle)
+{
+    uint32_t * hlink;
+    uint32_t hlink_type;
+    hlink = handle->pfl_head;
+
+    usb_printf("dump_pfl_queue \r\n");
+
+    if(hlink == NULL)
+    {
+        return;
+    }
+
+    while(1)
+    {
+        hlink_type = *hlink & ECHI_HLINK_TYPE_MASK;
+        switch(hlink_type)
+        {
+            case ECHI_HLINK_TYPE_ITD:
+                usb_printf("-->itd \r\n");
+                break;
+            case ECHI_HLINK_TYPE_QH:
+                usb_printf("-->qh \r\n");
+                break;
+            case ECHI_HLINK_TYPE_SITD:
+                usb_printf("-->sitd \r\n");
+                break;
+            case ECHI_HLINK_TYPE_FSTN:
+                usb_printf("-->fstn \r\n");
+                break;
+        }
+
+        if(*hlink & ECHI_T)
+        {
+            break;
+        }
+        else
+        {
+            hlink = hlink_next(hlink);
+        }
+    } 
+}
 
 /*
     hilink: new element to be install.
@@ -73,6 +137,7 @@ static void install_periodic_element(ehci_handle_t * handle, uint32_t * hlink)
     {
         // 0 element in queue, add to pfl_head.
         handle->pfl_head = hlink;
+        *hlink |= ECHI_T;
     }
     else
     {
@@ -119,6 +184,8 @@ static void install_periodic_element(ehci_handle_t * handle, uint32_t * hlink)
             hlink_cur  = (uint32_t *)(*hlink_cur);
         }
     }
+
+    dump_pfl_queue(handle);
 }
 
 /*
@@ -173,28 +240,80 @@ static void uninstall_periodic_qh(ehci_handle_t * handle, uint32_t addr, uint32_
     
 }
 
+
+static void itd_load_slot(ECHI_ITD_t * itd, uint32_t slot, void * buf, uint32_t size)
+{
+    uint32_t page;
+    uint32_t offset;
+
+    usb_printf("itd_load_slot %d \r\n", slot);
+    page   = slot * ITD_SLOT_BYTES_MAX/ITD_SLOT_PG_BYTES_MAX;
+    offset = slot * ITD_SLOT_BYTES_MAX % ITD_SLOT_PG_BYTES_MAX;
+    usb_printf("page = %d, offset = %d \r\n", page, offset);
+
+    // copy data to 4k buf.
+
+    itd->TSC[slot] = ITD_TSC_STATUS_ACTIVE   | 
+                     ITD_TSC_TRANS_LEN(size) |
+                     ITD_TSC_PAGE(page)      |
+                     ITD_TSC_OFFSET(offset) ;
+}
+
+
 #define EHCI_ITD_IN  1
 #define EHCI_ITD_OUT 0
+#define EHCI_BUF_4K_NUM_MAX 6
 static ECHI_ITD_t * install_periodic_itd(ehci_handle_t * handle, 
-                                         int32_t addr, 
-                                         int32_t ep, 
-                                         int32_t io, 
-                                         int32_t max_pack_size,
-                                         int32_t multi)
+                                         uint32_t addr, 
+                                         uint32_t ep, 
+                                         uint32_t io, 
+                                         uint32_t max_pack_size,
+                                         uint32_t multi,
+                                         uint32_t buf_4k_num)
 {
     ECHI_ITD_t * itd;
+    uint32_t i = 0;
+
+    if(buf_4k_num > EHCI_BUF_4K_NUM_MAX)
+    {
+        return NULL;
+    }
+
     itd = itd_malloc();
     if(itd == NULL)
     {
-        usb_printf("***install_periodic_itd - memory allocate - fail. \r\n");
+        usb_printf("***install_periodic_itd - itd memory allocate - fail. \r\n");
         return NULL;
     }
+
+    for(i = 0; i < buf_4k_num; i++)
+    {
+        itd->BP[i] = (uint32_t)buf_4k_malloc();
+        if(itd->BP[i] == (uint32_t)NULL)
+        {
+            usb_printf("***install_periodic_itd - 4k memory allocate - fail. \r\n");
+            while(i > 0)
+            {
+                i--;
+                buf_4k_free((void*)(itd->BP[i]));
+                if(i == 0)
+                {
+                    itd_free(itd);
+                    break;
+                }
+            }
+            return NULL;
+        }
+        usb_printf("bp[%d] installed. \r\n", i);
+    }
+
     itd->hlink = ECHI_HLINK_TYPE_ITD;
-    itd->BP[0] = ECHI_ITD_BP0_EP(ep) | ECHI_ITD_BP0_ADDR(addr);
-    itd->BP[1] = ECHI_ITD_BP1_IO(io) | ECHI_ITD_BP1_MAX_PACK(max_pack_size);
-    itd->BP[2] = ECHI_ITD_BP2_MULTI(multi);
+    itd->BP[0] |= ITD_BP0_EP(ep) | ITD_BP0_ADDR(addr);
+    itd->BP[1] |= ITD_BP1_IO(io) | ITD_BP1_MAX_PACK(max_pack_size);
+    itd->BP[2] |= ITD_BP2_MULTI(multi);
 
     install_periodic_element(handle, &(itd->hlink));
+    update_pfl_table(handle);
     return itd;
 }
 static void uninstall_periodic_itd(ehci_handle_t * handle, uint32_t addr, uint32_t ep)

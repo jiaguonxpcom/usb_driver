@@ -371,10 +371,34 @@ static void usb1_event_handler_port_detach(void)
 {
     state_usb1 = s_idle;
 }
+
+#define ISO_TEST_BUF_LEN (1024 * 3 * 8)
+char iso_buf[ISO_TEST_BUF_LEN + 1024];
+char * p_iso_buf;
+void iso_buf_init(void)
+{
+    uint32_t * p;
+    uint32_t i;
+
+    p_iso_buf = iso_buf + 1024;
+    p_iso_buf = (char *)((uint32_t)p_iso_buf & (~0x3ff));
+
+    p = (uint32_t *)p_iso_buf;
+    for(i=0; i < ISO_TEST_BUF_LEN/4; i++)
+    {
+        p[i] = i;
+    }
+}
+void iso_callback(uint32_t para)
+{
+    usb_printf("iso_callback \r\n");
+}
 static void usb1_event_handler_transfer_done(void)
 {
+    handle_t ep_iso_handle;
     usb_printf("-----------usb1_event_handler_transfer_done.\n");
     usb_printf("state_usb1 = %d.\n", state_usb1);
+    iso_buf_init();
 
     switch(state_usb1)
     {
@@ -387,7 +411,16 @@ static void usb1_event_handler_transfer_done(void)
             usb_printf(" s_begin_enumeration1 \r\n");
 
             // now try to setup iso schedule.
-            break;            
+            ep_iso_handle = echi_create_iso_ep(&usb1_handle, 
+                                               2,       // addr
+                                               1,       // ep
+                                               iso_out, // ep type
+                                               ehci_speed_high,
+                                               1024,    // max package size
+                                               3,       // multi
+                                               6);      // each itd use 6 4K buf
+            ehci_write_ep(ep_iso_handle, p_iso_buf, 1024 * 24, iso_callback);
+            break;
     }
 }
 
