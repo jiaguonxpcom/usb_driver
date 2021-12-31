@@ -147,12 +147,13 @@ static uint32_t make_hlink(void * addr, uint32_t type)
     return r;
 }
 /*
-    hlink point to new_addr
+    *hlink point to new_addr
 */
-static uint32_t update_hlink_address(uint32_t * hlink, uint32_t new_addr)
+static void update_hlink_address(uint32_t * hlink, uint32_t new_addr)
 {
     new_addr &= ECHI_HLINK_ADDR_MASK;
     *hlink   &= (~ECHI_HLINK_ADDR_MASK);
+    // clear ECHI_T
     *hlink   &=  ~ECHI_T;
     *hlink   |= new_addr;
 }

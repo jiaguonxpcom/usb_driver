@@ -1,7 +1,7 @@
 
 
 #define ITD_ADDR_MASK        (~0x1f)
-#define ITD_BP0_EP(n)        (n<<9)
+#define ITD_BP0_EP(n)        (n<<8)
 #define ITD_BP0_ADDR(n)      (addr<<0)
 #define ITD_BP1_IO(n)        (n<<11)
 #define ITD_BP1_MAX_PACK(n)  (n<<0)
@@ -150,7 +150,7 @@ static void install_periodic_element(ehci_handle_t * handle, uint32_t * hlink)
             {
                 // add to left of qh_cur
                 // 1.new node point to hlink_cur
-                *hlink = update_hlink_address(hlink, (uint32_t)hlink_cur);
+                update_hlink_address(hlink, (uint32_t)hlink_cur);
 
                 // 2.hlink_prev point to new
                 if(hlink_prev == NULL)
@@ -159,7 +159,7 @@ static void install_periodic_element(ehci_handle_t * handle, uint32_t * hlink)
                 }
                 else
                 {
-                    *hlink_prev = update_hlink_address(hlink_prev, (uint32_t)hlink);
+                    update_hlink_address(hlink_prev, (uint32_t)hlink);
                 }
 
                 usb_printf("period element added at left. \r\n");
@@ -246,10 +246,10 @@ static void itd_load_slot(ECHI_ITD_t * itd, uint32_t slot, void * buf, uint32_t 
     uint32_t page;
     uint32_t offset;
 
-    usb_printf("itd_load_slot %d \r\n", slot);
+    //usb_printf("itd_load_slot %d \r\n", slot);
     page   = slot * ITD_SLOT_BYTES_MAX/ITD_SLOT_PG_BYTES_MAX;
     offset = slot * ITD_SLOT_BYTES_MAX % ITD_SLOT_PG_BYTES_MAX;
-    usb_printf("page = %d, offset = %d \r\n", page, offset);
+    //usb_printf("page = %d, offset = %d \r\n", page, offset);
 
     // copy data to 4k buf.
 

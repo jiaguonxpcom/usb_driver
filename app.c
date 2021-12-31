@@ -226,6 +226,12 @@ int main(void)
     BOARD_BootClockRUN();
     BOARD_InitDebugConsole();
 
+    PRINTF("CCM_OBS_PLL_ARM_OUT:        %d\r\n", CLOCK_GetFreqFromObs(CCM_OBS_ARM_PLL_OUT));
+    PRINTF("CCM_OBS_BUS_CLK_ROOT:       %d\r\n", CLOCK_GetFreqFromObs(CCM_OBS_BUS_CLK_ROOT));
+    PRINTF("CCM_OBS_FLEXSPI2_CLK_ROOT:  %d\r\n", CLOCK_GetFreqFromObs(CCM_OBS_FLEXSPI2_CLK_ROOT));
+    PRINTF("CCM_OBS_SEMC_CLK_ROOT:      %d\r\n", CLOCK_GetFreqFromObs(CCM_OBS_SEMC_CLK_ROOT));
+
+
     low_level_tt();
 
     while(1)
@@ -395,7 +401,10 @@ void iso_callback(uint32_t para)
 }
 static void usb1_event_handler_transfer_done(void)
 {
-    handle_t ep_iso_handle;
+    #define ITD_CNT 3
+    handle_t ep_iso_handle[ITD_CNT];
+    int i;
+    
     usb_printf("-----------usb1_event_handler_transfer_done.\n");
     usb_printf("state_usb1 = %d.\n", state_usb1);
     iso_buf_init();
@@ -411,15 +420,22 @@ static void usb1_event_handler_transfer_done(void)
             usb_printf(" s_begin_enumeration1 \r\n");
 
             // now try to setup iso schedule.
-            ep_iso_handle = echi_create_iso_ep(&usb1_handle, 
+            for(i=0; i<ITD_CNT; i++)
+            {
+                ep_iso_handle[i] = echi_create_iso_ep(&usb1_handle, 
                                                2,       // addr
-                                               1,       // ep
+                                               i+1,       // ep
                                                iso_out, // ep type
                                                ehci_speed_high,
                                                1024,    // max package size
                                                3,       // multi
                                                6);      // each itd use 6 4K buf
-            ehci_write_ep(ep_iso_handle, p_iso_buf, 1024 * 24, iso_callback);
+
+            }
+            for(i=0; i<ITD_CNT; i++)
+            {
+                ehci_write_ep(ep_iso_handle[i], p_iso_buf, 1024 * 24, iso_callback);
+            }
             break;
     }
 }
